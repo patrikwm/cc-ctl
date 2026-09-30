@@ -26,7 +26,7 @@ td{padding:3px 6px;border-bottom:1px solid #1d2530;white-space:nowrap;max-width:
 </div>
 <div id="side"><div style="padding:8px"><button onclick="sel=null;side.classList.remove('open')">close ✕</button> <b id="stitle"></b><div id="tl"></div></div></div>
 <script>
-const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const f=n=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n|0);
 const dur=ms=>{if(!(ms>=0))return'–';const s=ms/1e3|0;return s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h'+(s/60%60|0)+'m':(s/86400|0)+'d'};
 let S=null,sel=null,logs=[];const side=$('side');
