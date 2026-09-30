@@ -1,0 +1,17 @@
+# docker compose up -d   ->  http://localhost:8080
+# Set CLAUDE_DIR if your Claude config is not ~/.claude (Windows PowerShell: $env:CLAUDE_DIR="$env:USERPROFILE\.claude").
+# Set CC_UID/CC_GID to your host ids (`id -u`, `id -g`) so the container can read your 0600 credentials file.
+services:
+  cc-ctl:
+    build: .
+    # image: ghcr.io/patrikwm/cc-ctl:latest   # once published, use this instead of build
+    user: "${CC_UID:-1000}:${CC_GID:-1000}"
+    ports: ["127.0.0.1:8080:8080"]   # localhost only: the dashboard has no authentication
+    volumes:
+      - ${CLAUDE_DIR:-${HOME}/.claude}:/claude:ro
+      - cc-ctl-data:/data
+    environment:
+      - CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION:-}   # set to your `claude --version` for the quota poller's user-agent
+    restart: unless-stopped
+volumes:
+  cc-ctl-data:

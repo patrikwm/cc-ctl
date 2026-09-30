@@ -1,0 +1,10 @@
+{
+  "name": "cc-ctl",
+  "version": "0.1.0",
+  "description": "Local dashboard and usage history for concurrent Claude Code sessions. Zero dependencies.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.13" },
+  "scripts": { "start": "node server.mjs", "test": "node test/accounting.mjs" },
+  "repository": { "type": "git", "url": "git+https://github.com/patrikwm/cc-ctl.git" }
+}

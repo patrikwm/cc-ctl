@@ -1,0 +1,56 @@
+<!doctype html><meta charset="utf-8"><title>cc-ctl</title><meta name="viewport" content="width=device-width">
+<style>
+:root{--bg:#0f1318;--p:#171d25;--b:#263040;--t:#d6dde6;--m:#7f8ba0;--g:#3fb950;--y:#d29922;--r:#f85149;--bl:#58a6ff;--gr:#6e7681}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:12px/1.4 ui-monospace,Consolas,monospace;display:flex;height:100vh;overflow:hidden}
+#main{flex:1;min-width:0;overflow:auto;padding:8px}#side{width:0;border-left:1px solid var(--b);background:var(--p);overflow:auto;transition:width .15s}#side.open{width:46%}
+.row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}.card{background:var(--p);border:1px solid var(--b);border-radius:4px;padding:8px;flex:1;min-width:220px}
+h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;color:var(--m);letter-spacing:.05em}
+.bar{height:8px;background:#0b0e12;border-radius:4px;overflow:hidden;margin:4px 0}.bar>i{display:block;height:100%}
+table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--m);font-weight:normal;padding:3px 6px;border-bottom:1px solid var(--b);position:sticky;top:0;background:var(--p)}
+td{padding:3px 6px;border-bottom:1px solid #1d2530;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}tr.s{cursor:pointer}tr.s:hover{background:#1d2530}tr.sel{background:#213049}
+.chip{padding:1px 6px;border-radius:9px;font-size:11px;color:#000}.healthy{background:var(--g)}.degraded{background:var(--r)}.idle{background:var(--y)}.suspended{background:var(--gr)}.unknown{background:#444;color:var(--t)}
+.m{color:var(--m)}.e{color:var(--r)}.w{color:var(--y)}.tl{border-left:2px solid var(--b);padding:2px 8px;margin:4px 8px;white-space:pre-wrap;word-break:break-word}
+.tl.user{border-color:var(--bl)}.tl.tool{border-color:var(--y)}.tl.error{border-color:var(--r)}.tl.result{border-color:var(--gr);color:var(--m)}
+#log{height:160px;overflow:auto}select,label,button{font:inherit;background:var(--bg);color:var(--t);border:1px solid var(--b);border-radius:3px}
+.note{color:var(--m);font-size:11px;line-height:1.5}svg{width:100%;height:90px;display:block}
+</style>
+<div id="main">
+ <div class="row" id="gauges"></div>
+ <div class="row"><div class="card" style="flex:2"><h3>Cost per 30s · last 6h · all sessions <span id="tot" class="m"></span></h3><svg id="chart" preserveAspectRatio="none" viewBox="0 0 720 90"></svg></div>
+  <div class="card" style="flex:2"><h3>What is this correlating? (local $ share, last 5h)</h3><div id="corr"></div>
+   <div class="note"><b>This is NOT the metered window %.</b> Two reasons they diverge: (1) the meter is computed server-side over rolling windows and dollar spend is not proportional to it; (2) cache reads cost ~10× less per token in $ but still consume metered quota, so a session that looks nearly free in dollars can still be expensive against the meter. Cache-read tokens are shown in the table for that reason.</div></div></div>
+ <div class="card" style="margin-bottom:8px"><h3>Sessions <label><input type="checkbox" id="all"> show unknown/old</label> <span id="unp" class="e"></span></h3>
+  <table><thead><tr><th>cwd</th><th>status</th><th>model</th><th>live tool</th><th>turns</th><th>in</th><th>out</th><th>cache-rd</th><th>cache-wr</th><th>cost</th><th>idle</th><th>spend</th></tr></thead><tbody id="rows"></tbody></table></div>
+ <div class="card"><h3>Log <select id="lf"><option value="">all sessions</option></select> <select id="ll"><option value="">all levels</option><option>warn</option><option>error</option></select></h3><div id="log"></div></div>
+ <div class="note" id="foot" style="margin-top:6px"></div>
+</div>
+<div id="side"><div style="padding:8px"><button onclick="sel=null;side.classList.remove('open')">close ✕</button> <b id="stitle"></b><div id="tl"></div></div></div>
+<script>
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const f=n=>n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n|0);
+const dur=ms=>{if(!(ms>=0))return'–';const s=ms/1e3|0;return s<60?s+'s':s<3600?(s/60|0)+'m':s<86400?(s/3600|0)+'h'+(s/60%60|0)+'m':(s/86400|0)+'d'};
+let S=null,sel=null,logs=[];const side=$('side');
+function spark(a){if(!a)return'';const mx=Math.max(...a,1e-9);return'<svg viewBox="0 0 60 14" style="width:60px;height:14px;display:inline"><polyline fill="none" stroke="#58a6ff" stroke-width="1" points="'+a.map((v,i)=>`${i*3},${13-v/mx*12}`).join(' ')+'"/></svg>'}
+function render(){if(!S)return;const now=Date.now(),q=S.quota;
+ $('gauges').innerHTML=(q.buckets.length?q.buckets.map(b=>{const c=b.pct>=90?'--r':b.pct>=70?'--y':'--g';return`<div class="card"><h3>${esc(b.label)}</h3><b style="font-size:18px">${b.pct.toFixed(0)}%</b> <span class="m">resets in ${b.resetsAt?dur(Date.parse(b.resetsAt)-now):'?'}</span><div class="bar"><i style="width:${Math.min(100,b.pct)}%;background:var(${c})"></i></div></div>`}).join(''):'<div class="card m">no quota data yet</div>')
+  +`<div class="card" style="flex:.6"><h3>Quota reading</h3><span class="m">${q.fetchedAt?'age '+dur(now-q.fetchedAt):'never fetched'}</span>${q.error?`<div class="e">${esc(q.error)} <span class="m">@${new Date(q.errorAt).toLocaleTimeString()}</span></div>`:''}<div class="note">server-reported, undocumented</div></div>`;
+ const all=$('all').checked,rows=S.sessions.filter(s=>all||(s.status!=='unknown'&&s.status!=='suspended')||s.usd>0&&now-s.last<36e5);
+ $('rows').innerHTML=rows.map(s=>{const t=s.tokens||{};return`<tr class="s ${s.id===sel?'sel':''}" onclick="pick('${esc(s.id)}')"><td title="${esc(s.cwd)}">${esc((s.cwd||s.id).split(/[\\/]/).slice(-2).join('/'))}</td><td><span class="chip ${s.status}">${s.status}</span></td><td>${esc(s.model||'')}${s.unpriced.length?' <span class="chip degraded">unpriced</span>':''}</td><td title="${esc(s.toolSummary)}">${esc(s.tool||'')}</td><td>${s.turns}</td><td>${f(t.input||0)}</td><td>${f(t.output||0)}</td><td>${f(t.cacheRead||0)}</td><td>${f((t.cacheWrite5m||0)+(t.cacheWrite1h||0))}</td><td>$${s.usd.toFixed(2)}</td><td>${s.last?dur(now-s.last):'–'}</td><td>${spark(s.spark)}</td></tr>`}).join('');
+ const up=S.sessions.filter(s=>s.unpriced.length);$('unp').textContent=up.length?'⚠ unpriced models: '+[...new Set(up.flatMap(s=>s.unpriced))].join(', '):'';
+ const tot=S.chart.total,mx=Math.max(...tot,1e-9);$('chart').innerHTML='<polyline fill="none" stroke="#3fb950" points="'+tot.map((v,i)=>`${i},${88-v/mx*84}`).join(' ')+'"/>';
+ $('tot').textContent=`· max $${mx.toFixed(3)}/30s · all-time $${S.totals.usd.toFixed(2)}`;
+ const sh=S.sessions.filter(s=>s.w5>0),sum=sh.reduce((a,s)=>a+s.w5,0)||1;
+ $('corr').innerHTML=sh.slice(0,8).map(s=>`<div>${esc((s.cwd||s.id).split(/[\\/]/).pop())} <span class="m">$${s.w5.toFixed(2)} · ${(s.w5/sum*100).toFixed(0)}% of local spend · cache-read ${f(s.tokens?.cacheRead||0)}</span><div class="bar"><i style="width:${s.w5/sum*100}%;background:var(--bl)"></i></div></div>`).join('')||'<span class="m">no spend in window</span>';
+ $('foot').textContent=`prices hand-maintained, fetched ${S.pricesFetched} · cost = local estimate at list API prices · tokens exact per transcript`;
+ const lf=$('lf'),have=new Set([...lf.options].map(o=>o.value));for(const s of S.sessions)if(!have.has(s.id)&&s.usd+s.turns>0)lf.add(new Option((s.cwd||s.id).split(/[\\/]/).pop()+' '+s.id.slice(0,6),s.id));}
+function renderLog(){const sv=$('lf').value,lv=$('ll').value;$('log').innerHTML=logs.filter(l=>(!sv||l.session===sv)&&(!lv||(lv==='error'?l.level==='error':l.level!=='info'))).slice(-300).map(l=>`<div class="${l.level==='error'?'e':l.level==='warn'?'w':''}"><span class="m">${new Date(l.ts).toLocaleTimeString()} ${esc(l.session.slice(0,6))}</span> ${esc(l.text)}</div>`).join('');$('log').scrollTop=1e9}
+async function pick(id){sel=id;side.classList.add('open');const s=S.sessions.find(x=>x.id===id);$('stitle').textContent=(s?.cwd||'')+' '+id.slice(0,8);$('tl').textContent='loading…';
+ const t=await (await fetch('/api/session/'+encodeURIComponent(id))).json();
+ $('tl').innerHTML=t.map(e=>`<div class="tl ${e.k}"><span class="m">${e.ts?new Date(e.ts).toLocaleTimeString():''} ${e.k}${e.tool?' '+esc(e.tool):''}</span>\n${esc(e.t)}</div>`).join('')||'<span class="m">no transcript</span>';side.scrollTop=1e9;render()}
+$('lf').onchange=$('ll').onchange=renderLog;$('all').onchange=render;
+const es=new EventSource('/events');
+es.addEventListener('init',e=>{const d=JSON.parse(e.data);logs=d.logs;S=d.state;render();renderLog()});
+es.addEventListener('state',e=>{S=JSON.parse(e.data);render()});
+es.addEventListener('quota',e=>{if(S){S.quota=JSON.parse(e.data);render()}});
+es.addEventListener('log',e=>{logs.push(JSON.parse(e.data));if(logs.length>1000)logs.shift();renderLog()});
+</script>
